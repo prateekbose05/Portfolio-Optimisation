@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+*.xlsx
+!docs/results/portfolio_results.xlsx
+run_log.txt
+generate_results.command
+streamlit_demo.command
+streamlit_log.txt
+capture_screenshot.command
+capture_log.txt
+push_to_github.command
+push_log.txt
+.git/
