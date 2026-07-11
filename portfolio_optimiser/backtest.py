@@ -37,12 +37,12 @@ def run_backtest(prices: pd.DataFrame, risk_free: float, split: float = 0.7,
     for name, weights in strategies.items():
         daily = test_returns @ weights
         summaries[name] = performance_summary(daily, risk_free, benchmark_returns)
-        cumulative[name] = (1 + daily).cumprod()
+        cumulative[name] = np.exp(daily.cumsum())
 
     if benchmark_returns is not None and not benchmark_returns.empty:
         summaries["Benchmark"] = performance_summary(benchmark_returns, risk_free,
                                                      benchmark_returns)
-        cumulative["Benchmark"] = (1 + benchmark_returns).cumprod()
+        cumulative["Benchmark"] = np.exp(benchmark_returns.cumsum())
 
     return {
         "weights": {name: w for name, w in strategies.items()},

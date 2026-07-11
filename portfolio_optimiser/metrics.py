@@ -34,8 +34,11 @@ def sortino_ratio(daily_returns: pd.Series, risk_free: float) -> float:
 
 
 def max_drawdown(daily_returns: pd.Series) -> float:
-    """Largest peak-to-trough decline of the cumulative return series (negative number)."""
-    wealth = (1 + daily_returns).cumprod()
+    """Largest peak-to-trough decline in wealth (negative number).
+
+    Input is daily log returns, so wealth is exp of the cumulative sum.
+    """
+    wealth = np.exp(daily_returns.cumsum())
     return float((wealth / wealth.cummax() - 1).min())
 
 

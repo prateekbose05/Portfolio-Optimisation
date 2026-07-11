@@ -73,7 +73,8 @@ def test_max_drawdown_signs():
     up_only = pd.Series([0.01] * 50)
     assert max_drawdown(up_only) == 0
     crash = pd.Series([0.01] * 10 + [-0.5] + [0.0] * 10)
-    assert max_drawdown(crash) <= -0.5 + 1e-9
+    # a -0.5 log return is a wealth factor of exp(-0.5)
+    assert max_drawdown(crash) == pytest.approx(np.exp(-0.5) - 1)
 
 
 def test_var_ordering():

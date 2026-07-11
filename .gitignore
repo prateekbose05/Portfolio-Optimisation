@@ -4,14 +4,6 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+*.command
 *.xlsx
 !docs/results/portfolio_results.xlsx
-run_log.txt
-generate_results.command
-streamlit_demo.command
-streamlit_log.txt
-capture_screenshot.command
-capture_log.txt
-push_to_github.command
-push_log.txt
-.git/
