@@ -14,7 +14,8 @@ Give it any set of tickers (ASX, US, ETFs, anything Yahoo Finance covers) and it
 4. **Uses a proper Sharpe ratio**: excess return over a configurable risk-free rate (default 4.35%, the RBA cash rate).
 5. **Backtests out of sample**: weights are fitted on the first 70% of history, then held fixed through the unseen 30%, and compared against an equal-weight portfolio and a market benchmark (default ASX 200, `^AXJO`).
 6. **Reports full risk metrics**: Sharpe, Sortino, maximum drawdown, historical VaR and CVaR (95%), and beta against the benchmark.
-7. **Writes everything up automatically**: a markdown results report with charts and a conclusion, plus an Excel workbook.
+7. **Tests the weights net of trading costs**: simulates each portfolio on its actual holdings with never, quarterly and monthly rebalancing, charging a configurable cost (default 10 bps) on every dollar traded, and reports cost drag, turnover and weight drift.
+8. **Writes everything up automatically**: a markdown results report with charts and a conclusion, plus an Excel workbook.
 
 ## Results
 
@@ -46,15 +47,18 @@ python run_analysis.py --tickers CSL.AX WES.AX TLS.AX WOW.AX --start 2019-01-01
 
 # US portfolio against the S&P 500, custom risk-free rate
 python run_analysis.py --tickers AAPL MSFT NVDA JPM --benchmark ^GSPC --rf 0.043
+
+# Higher trading costs (25 bps per dollar traded)
+python run_analysis.py --cost-bps 25
 ```
 
 ### Interactive app
 
 ```bash
-streamlit run app.py
+python3 run.py
 ```
 
-Type any tickers in the sidebar and explore the frontier, allocations and backtest live.
+Type any tickers in the sidebar and explore the frontier, allocations, backtest and trading-cost study live. `run.py` starts Streamlit with one setting that stops a pyarrow crash on macOS; `streamlit run app.py` works too where that crash does not occur.
 
 ![Streamlit app: efficient frontier](docs/screenshots/streamlit_frontier.png)
 
@@ -66,7 +70,7 @@ Type any tickers in the sidebar and explore the frontier, allocations and backte
 pytest tests/ -v
 ```
 
-Ten unit tests run on synthetic data (no network), including the invariant that the analytical optimiser can never lose to random sampling. They run in CI on every push.
+Nineteen unit tests run on synthetic data (no network), including the invariants that the analytical optimiser can never lose to random sampling and that a cost-free buy-and-hold reproduces the weighted price relatives exactly. They run in CI on every push.
 
 ## Project structure
 
@@ -76,11 +80,12 @@ portfolio_optimiser/
 ├── metrics.py        # Sharpe, Sortino, drawdown, VaR/CVaR, beta
 ├── optimisation.py   # Monte Carlo + SLSQP max-Sharpe / min-vol / frontier
 ├── backtest.py       # Out-of-sample evaluation vs equal weight and benchmark
+├── costs.py          # Rebalancing simulation net of transaction costs
 ├── plots.py          # All charts (shared by the CLI and the app)
 └── report.py         # Auto-generated RESULTS.md
 run_analysis.py       # CLI entry point
 app.py                # Streamlit app
-tests/test_core.py    # Unit tests (synthetic data)
+tests/                # Unit tests (synthetic data)
 ```
 
 ## Methodology notes
@@ -88,11 +93,12 @@ tests/test_core.py    # Unit tests (synthetic data)
 - **Returns**: daily log returns, annualised with 252 trading days. Log returns are summed for portfolio aggregation, a standard approximation.
 - **Optimisation**: long-only, fully invested (weights in [0, 1], summing to 1). The frontier is traced by minimising volatility at each target return.
 - **Why both Monte Carlo and SLSQP**: with 5 assets, the best of 10,000 random portfolios typically lands a few basis points of Sharpe below the true optimum; the gap is reported in the results. The cloud is kept because it shows *where the frontier comes from*.
-- **Backtest honesty**: a single chronological split, buy-and-hold, no transaction costs. In-sample statistics always flatter, which is exactly why the report leads with out-of-sample numbers.
+- **Backtest honesty**: a single chronological split. In-sample statistics always flatter, which is exactly why the report leads with out-of-sample numbers.
+- **Costs and rebalancing**: the headline backtest sums weighted log returns at fixed weights. The cost study compounds simple returns on actual holdings instead, so weights drift between rebalances and "never" is a true buy-and-hold. Each rebalance trades back to target at the period-end close and pays the cost rate on buys and sells. Turnover is reported one-way.
 
 ## Limitations and further work
 
-Mean-variance weights are estimates built on noisy expected returns, so they concentrate in whatever did well historically; the min-volatility portfolio usually transfers out of sample better than max-Sharpe. Natural extensions: walk-forward validation, Ledoit-Wolf covariance shrinkage, transaction costs and periodic rebalancing, and Black-Litterman views.
+Mean-variance weights are estimates built on noisy expected returns, so they concentrate in whatever did well historically; the min-volatility portfolio usually transfers out of sample better than max-Sharpe. The cost model is a flat rate per dollar traded, with no spread, market impact, minimum brokerage or tax. Natural extensions: walk-forward validation, Ledoit-Wolf covariance shrinkage, a no-trade band around target weights, and Black-Litterman views.
 
 ## Author
 

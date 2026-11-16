@@ -14,7 +14,9 @@ from pathlib import Path
 import pandas as pd
 
 from portfolio_optimiser.backtest import run_backtest
-from portfolio_optimiser.data import annualised_inputs, fetch_prices, log_returns
+from portfolio_optimiser.costs import rebalancing_study
+from portfolio_optimiser.data import (annualised_inputs, fetch_prices, log_returns,
+                                      train_test_split)
 from portfolio_optimiser.metrics import portfolio_return, portfolio_volatility, sharpe_ratio
 from portfolio_optimiser.optimisation import (efficient_frontier, max_sharpe_weights,
                                               min_volatility_weights, monte_carlo_portfolios,
@@ -38,6 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--portfolios", type=int, default=10_000)
     parser.add_argument("--split", type=float, default=0.7,
                         help="Fraction of history used for training in the backtest.")
+    parser.add_argument("--cost-bps", type=float, default=10.0,
+                        help="Trading cost per dollar bought or sold, in basis points.")
     parser.add_argument("--outdir", default="docs/results")
     return parser.parse_args()
 
@@ -80,6 +84,10 @@ def main() -> None:
     print("Backtesting out of sample...")
     backtest = run_backtest(prices, args.rf, args.split, benchmark_prices)
 
+    print(f"Simulating rebalancing net of {args.cost_bps:g} bps trading costs...")
+    test_prices = train_test_split(prices, args.split)[1]
+    cost_study = rebalancing_study(test_prices, backtest["weights"], args.rf, args.cost_bps)
+
     efficient_frontier_plot(mc_results, frontier, points).savefig(
         charts / "efficient_frontier.png", dpi=200)
     weights_plot({"Max Sharpe": ms_weights, "Min Volatility": mv_weights}, tickers).savefig(
@@ -98,6 +106,7 @@ def main() -> None:
                        "sharpe": sharpe_ratio(ms_ret, ms_vol, args.rf)},
         "mc_best_sharpe": float(mc_results["Sharpe"].max()),
         "weights_table": table, "backtest": backtest,
+        "cost_bps": args.cost_bps, "cost_study": cost_study,
     }
     (outdir / "RESULTS.md").write_text(build_report(context))
 
@@ -105,6 +114,7 @@ def main() -> None:
         mc_results.to_excel(writer, sheet_name="Monte Carlo", index=False)
         table.to_excel(writer, sheet_name="Optimal Weights")
         backtest["summary"].to_excel(writer, sheet_name="Backtest")
+        cost_study.to_excel(writer, sheet_name="Rebalancing & Costs")
 
     print(f"\nDone. Report: {outdir / 'RESULTS.md'}, charts: {charts}/")
     print(f"Max Sharpe {context['max_sharpe']['sharpe']:.2f} "

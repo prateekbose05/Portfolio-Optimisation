@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 
@@ -19,6 +20,88 @@ def _format_summary(summary: pd.DataFrame) -> pd.DataFrame:
         else:
             formatted.loc[row] = summary.loc[row].map(lambda x: f"{x:.2f}")
     return formatted
+
+
+def _backtest_weights(context: dict) -> list[str]:
+    """The weights the backtest actually held, which differ from the full-history optimum."""
+    weights = context["backtest"].get("weights")
+    if not weights:
+        return []
+    table = pd.DataFrame({f"{name} (%)": np.round(np.asarray(w) * 100, 2)
+                          for name, w in weights.items()}, index=context["tickers"])
+    table = table.sort_values(table.columns[0], ascending=False)
+    return [
+        "Weights held in the backtest (fitted on the training window, so they differ from "
+        "the full-history optimum above):",
+        "",
+        table.to_markdown(),
+        "",
+    ]
+
+
+def _cost_section(context: dict) -> list[str]:
+    """The rebalancing and transaction-cost section, if the study was run."""
+    study = context.get("cost_study")
+    if study is None:
+        return []
+    cost_bps = context["cost_bps"]
+
+    table = study.reset_index()
+    for column in ["Gross return", "Net return", "Cost drag", "Annual turnover",
+                   "Max weight drift"]:
+        table[column] = table[column].map(_pct)
+    table["Net Sharpe"] = table["Net Sharpe"].map(lambda x: f"{x:.2f}")
+
+    lines = [
+        "## Rebalancing and transaction costs",
+        "",
+        "The backtest above holds the fitted weights fixed and trades for free. Here each "
+        "portfolio is bought on the first day of the test window and simulated on its actual "
+        f"holdings, paying {cost_bps:g} basis points on every dollar bought or sold "
+        "(including the initial purchase). Left alone, weights drift with prices; "
+        "rebalancing trades them back to target at each month or quarter end.",
+        "",
+        table.to_markdown(index=False, disable_numparse=True),
+        "",
+    ]
+
+    if "Max Sharpe" in study.index.get_level_values(0):
+        ms = study.loc["Max Sharpe"]
+        never, monthly = ms.loc["never"], ms.loc["monthly"]
+        labels = {"never": "never rebalancing", "quarterly": "quarterly rebalancing",
+                  "monthly": "monthly rebalancing"}
+        if float(ms["Annual turnover"].astype(float).max()) < 1e-9:
+            # One holding (or assets that never diverge): nothing to trade back to target.
+            lines += [
+                "The max-Sharpe portfolio fitted on the training window is a single holding, "
+                "so there is nothing to rebalance: all three frequencies give the same "
+                f"{_pct(float(never['Net return']))} a year after the "
+                f"{_pct(float(never['Cost drag']))} cost of the initial purchase. The "
+                "min-volatility and equal-weight rows show the effect of rebalancing on "
+                "diversified portfolios.",
+                "",
+            ]
+        else:
+            best = ms["Net return"].astype(float).idxmax()
+            lines += [
+                f"For the max-Sharpe portfolio, the best net return came from "
+                f"**{labels[best]}** ({_pct(float(ms.loc[best, 'Net return']))} a year "
+                "after costs). "
+                f"Never rebalancing cost {_pct(float(never['Cost drag']))} a year and let "
+                f"one holding drift as far as {float(never['Max weight drift']) * 100:.1f} "
+                "points from its target weight; "
+                f"monthly rebalancing turned over {_pct(float(monthly['Annual turnover']))} "
+                f"of the portfolio a year and cost {_pct(float(monthly['Cost drag']))}.",
+                "",
+            ]
+        lines += [
+            "Turnover is one-way (selling 5% to buy 5% is 5%). Gross returns differ by "
+            "frequency because rebalancing changes what is held, not only what is paid: it "
+            "sells winners and buys laggards, which helps when prices mean-revert and hurts "
+            "when they trend.",
+            "",
+        ]
+    return lines
 
 
 def build_report(context: dict) -> str:
@@ -74,12 +157,14 @@ def build_report(context: dict) -> str:
         "## Out-of-sample backtest",
         "",
         "Weights were fitted on the training window only, then held fixed (buy and hold) "
-        "through the unseen test window.",
+        "through the unseen test window, with no trading costs.",
         "",
+        *_backtest_weights(context),
         _format_summary(summary).to_markdown(),
         "",
         "![Out-of-sample performance](charts/backtest.png)",
         "",
+        *_cost_section(context),
         "## Conclusion",
         "",
         f"On the test window, the strongest risk-adjusted performer was the {best} portfolio "
@@ -94,10 +179,12 @@ def build_report(context: dict) -> str:
         "",
         "## Limitations",
         "",
-        "- Long-only, fully invested, no transaction costs, taxes or rebalancing.",
+        "- Long-only and fully invested. Trading costs are a flat rate per dollar traded: "
+        "no bid-ask spread model, market impact, minimum brokerage or tax.",
         "- Historical returns and covariances are weak predictors of future ones.",
         "- Single train/test split rather than walk-forward validation.",
-        "- Log returns are summed for portfolio aggregation, a standard approximation.",
+        "- The headline backtest sums weighted log returns, a standard approximation; the "
+        "cost study compounds simple returns on actual holdings.",
         "",
     ]
     return "\n".join(lines)

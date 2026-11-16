@@ -1,12 +1,15 @@
-"""Interactive portfolio optimiser. Run with: streamlit run app.py"""
+"""Interactive portfolio optimiser. Run with: python3 run.py"""
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
 from portfolio_optimiser.backtest import run_backtest
-from portfolio_optimiser.data import annualised_inputs, fetch_prices, log_returns
+from portfolio_optimiser.costs import rebalancing_study
+from portfolio_optimiser.data import (annualised_inputs, fetch_prices, log_returns,
+                                      train_test_split)
 from portfolio_optimiser.metrics import portfolio_return, portfolio_volatility, sharpe_ratio
 from portfolio_optimiser.optimisation import (efficient_frontier, max_sharpe_weights,
                                               min_volatility_weights, monte_carlo_portfolios,
@@ -29,6 +32,8 @@ with st.sidebar:
                                 format="%.4f", help="Default: RBA cash rate.")
     n_sims = st.select_slider("Monte Carlo simulations", [1_000, 5_000, 10_000, 25_000], 10_000)
     split = st.slider("Backtest training share", 0.5, 0.9, 0.7, 0.05)
+    cost_bps = st.number_input("Trading cost (basis points per dollar traded)", 0.0, 100.0,
+                               10.0, 5.0)
     run = st.button("Run analysis", type="primary")
 
 
@@ -63,6 +68,8 @@ if run:
     mv_weights = min_volatility_weights(mean_returns, cov_matrix)
     frontier = efficient_frontier(mean_returns, cov_matrix)
     backtest = run_backtest(prices, risk_free, split, benchmark_prices)
+    _, test_prices = train_test_split(prices, split)
+    cost_study = rebalancing_study(test_prices, backtest["weights"], risk_free, cost_bps)
 
     ms_ret = portfolio_return(ms_weights, mean_returns)
     ms_vol = portfolio_volatility(ms_weights, cov_matrix)
@@ -85,7 +92,7 @@ if run:
         left, right = st.columns([1, 2])
         table = weights_table(ms_weights, list(prices.columns), "Max Sharpe (%)").join(
             weights_table(mv_weights, list(prices.columns), "Min Volatility (%)"))
-        left.dataframe(table, use_container_width=True)
+        left.dataframe(table, width="stretch")
         right.pyplot(weights_plot({"Max Sharpe": ms_weights, "Min Volatility": mv_weights},
                                   list(prices.columns)))
         st.pyplot(correlation_plot(returns))
@@ -94,12 +101,30 @@ if run:
         train_start, train_end = backtest["train_range"]
         st.caption(f"Weights fitted on {train_start.date()} to {train_end.date()}, "
                    "then held fixed through the unseen test window.")
-        st.dataframe(backtest["summary"].style.format("{:.4f}"), use_container_width=True)
+        st.dataframe(backtest["summary"].style.format("{:.4f}"), width="stretch")
         st.pyplot(cumulative_returns_plot(backtest["cumulative"], backtest["test_range"][0]))
+
+        st.subheader("Weights held in the backtest")
+        st.caption("Fitted on the training window, so they differ from the full-history "
+                   "optimum on the Allocations tab.")
+        held = pd.DataFrame({f"{name} (%)": np.round(np.asarray(w) * 100, 2)
+                             for name, w in backtest["weights"].items()},
+                            index=list(prices.columns))
+        st.dataframe(held, width="stretch")
+
+        st.subheader("Rebalancing and trading costs")
+        st.caption(f"Each portfolio is bought on the first day of the test window and "
+                   f"simulated on its actual holdings, paying {cost_bps:g} basis points on "
+                   "every dollar traded. Turnover is one-way.")
+        percent = ["Gross return", "Net return", "Cost drag", "Annual turnover",
+                   "Max weight drift"]
+        st.dataframe(cost_study.reset_index().style.format(
+            {**{column: "{:.2%}" for column in percent}, "Net Sharpe": "{:.2f}"}),
+            width="stretch", hide_index=True)
 
     with tab4:
         st.line_chart(prices / prices.iloc[0])
-        st.dataframe(prices.tail(10), use_container_width=True)
+        st.dataframe(prices.tail(10), width="stretch")
 else:
     st.info("Set your tickers in the sidebar and hit Run analysis. "
             "Any Yahoo Finance tickers work: ASX (CBA.AX), US (AAPL), ETFs (VAS.AX).")
